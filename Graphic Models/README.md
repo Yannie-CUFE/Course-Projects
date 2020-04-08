@@ -1,11 +1,10 @@
-
 # Graphic Models
 
 测试图模型中的Glasso，Neighborhood Selection以及Space。
 
 #### 1.DGP   
 
-- a)	Ω：对角线元素ρ，非对角线的元素以0.01的概率等于0.5    
+- a)	协方差矩阵Ω：对角线元素为常数ρ，非对角线的元素以0.01的概率等于0.5    
 - b)	问题在于该Ω是否可以用来构造多元正态回归模型（关键在于常数ρ）（hint：条件数需要满足一定性质）。          
 
 #### 2.测试Graphical Models中的Glasso和Neighborhood Selection     
