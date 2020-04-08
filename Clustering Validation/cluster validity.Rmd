@@ -1,0 +1,589 @@
+---
+title: "聚类有效性指标的比较分析——基于5种距离度量方法"
+author: "Yang Le"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+## 产生数据
+
+### 函数GenData    
+输入：   
+
+1. n: 向量，每个类簇的样本个数，向量长度作为类簇数量k
+2. p: 有效变量个数
+3. sigma: 向量，每个类簇的标准差，长度与k一致
+4. outlier: 离群点的个数
+5. centers: 给定类簇中心（若不赋值将随机产生）
+
+```{r warning=FALSE,fig.align='center',dpi=300, message=FALSE,fig.width=6,fig.height=4}
+library(mvtnorm)
+GenData <- function(n = c(50,50), p = 2, sigma = c(0.06,0.06), outlier = 0, centers = NA){
+  # 类簇个数
+  k <- length(n)
+  
+  # 判断参数输入是否有效
+  if(k!=length(sigma)){ 
+    print("类别数量与标准差参数的长度不匹配！")
+    return(NULL)
+  }
+  # 给定类簇中心（若不赋值将随机产生）
+  if(is.na(centers)[1])
+    # 从等差数列中抽样产生类簇中心（保证“完全分离”）
+    centers <- replicate(p,sample(c(-3:3),k,replace = F))
+  else if(k!=dim(centers)[1]){
+    print("类别数量与类中心参数的长度不匹配！")
+    return(NULL)
+  }
+  
+  data <- c() # 生成的数据
+  clustLab <- c() # 类簇类别的标签
+  for(i in 1:k){
+    center <- centers[i,]
+    covar <- matrix(0,p,p) 
+    # 协方差矩阵
+    diag(covar) <- sigma[i]
+    cluster <- rmvnorm(n[i], center, covar) 
+    # 产生一个类簇
+    data <- rbind(data, cluster) 
+    # 合并已生成的数据和标签
+    clustLab <- c(clustLab,rep(i,n[i]))
+  }
+  
+  # 产生噪音点 （不属于任何一类）
+  if(outlier > 0){
+    # 从均匀分布中产生噪音点 
+    outdata <- t(replicate(outlier, runif(p,-4,4)))
+    # 合并数据和标签
+    data <- rbind(data,outdata)
+    clustLab <- c(clustLab,rep(k+1,outlier))
+  }
+  
+  # 返回结果（数据和类簇标签）
+  out <- list(data=data, clustLab=clustLab)
+  return(out)
+}
+```
+
+### 以生成2维的数据为例
+
+1.	完全分离
+2.	完全分离有噪音点
+3.	类簇的密度不同
+4.	包含子类
+5.	类簇的大小不同
+
+```{r warning=FALSE,fig.align='center',dpi=300, message=FALSE,fig.width=6,fig.height=4}
+# 作图函数
+library(ggplot2)
+library(ggthemes)
+clustPlot <- function(data,title=NA){
+  data <- data.frame(data$data, data$clustLab)
+  colnames(data) <- c(paste("X",1:p,sep = ""), "clustLab")
+  data$clustLab <- factor(data$clustLab)
+  p<-ggplot(data,aes(X1,X2,color=clustLab))+
+    geom_point(show.legend = FALSE,size=0.8)+
+    ggtitle(title)+xlim(-4,4)+ylim(-4,4)+
+    theme_bw()+
+    theme(axis.title=element_blank(),
+          plot.title = element_text(hjust = 0.5,size = 8))
+  return(p)
+}
+
+# 1.	完全分离
+p = 2
+n <- rep(100,5)
+sigma <- rep(0.06,5)
+data_1 <- GenData(n = n, p = p, sigma = sigma, outlier = 0)
+p1 <- clustPlot(data_1,"类簇之间完全分离")
+
+# 2.	完全分离有噪音点
+data_2 <- GenData(n = n, p = p, sigma = sigma, outlier = 50)
+p2 <- clustPlot(data_2,"类簇之间完全分离但有噪音点")
+
+# 3.	类簇的密度不同
+n <- rep(100,3)
+sigma <- c(0.08,0.15,0.3)
+data_3 <- GenData(n = n, p = p, sigma = sigma, outlier = 0)
+p3 <- clustPlot(data_3,"类簇的密度不同")
+
+# 4.	包含子类
+n <- rep(100,5)
+sigma <- rep(0.06,5)
+k <- 3 # 三个大类
+k_sub <- 2 # 其中两类含有子类
+centers <-replicate(p,sample(c(-3:3),k,replace = F))
+bias <- sample(c(-0.5,0.5),4,replace = T) # 设置子类的偏移
+dim(bias)<-c(2,2)
+centers <- rbind(centers, centers[sample(1:k,k_sub),] + bias)             
+data_4 <- GenData(n = n, p = p, sigma = sigma, outlier = 0, centers = centers)
+p4 <- clustPlot(data_4,"类簇中包含子类")
+
+# 5.	类簇的大小不同
+n <- c(50,50,100)
+sigma <- c(0.1,0.1,0.2)
+data_5 <- GenData(n = n, p = p, sigma = sigma, outlier = 0)
+p5 <- clustPlot(data_5,"类簇的大小不同")
+
+library(ggpubr)
+ggarrange(p1, p2, p3, p4, p5, nrow = 2, ncol = 3)
+```
+
+## 聚类及其有效性指标的计算
+
+### F1 score
+
+R的MLmetrics包中的F1_score仅针对二分类，这里是个多分类问题，因此重新定义了函数f1_fun用于计算多分类的F1_score.     
+另外，直接计算F1_score会有标签不匹配的问题，这里将F1_score封装为一个新的函数，将聚类结果的类簇标签和真实的标签进行匹配。   
+```{r}
+# 多分类的F1_score
+f1_fun <- function(y_true,y_pred){
+  class <- sort(unique(y_true))
+  tp=NA
+  fp=NA
+  fn=NA
+  for(i in 1:length(class)){
+    tp[i] = sum(y_pred==class[i] & y_true==class[i])
+    fp[i] = sum(y_pred==class[i] & y_true!=class[i])
+    fn[i] = sum(y_pred!=class[i] & y_true==class[i])
+  }
+  f1 = 2*tp/(2*tp+fp+fn)
+  return(mean(f1))
+}
+
+# 针对于聚类结果的F1_score（解决标签匹配问题）
+computeF1_score <- function(TrueClust,EstmateClust){
+  cluster_label <- unique(TrueClust)
+  new_EstmateClust <- rep(length(cluster_label)+1,length(EstmateClust))
+  for(i in cluster_label){
+    true_i <- EstmateClust[TrueClust==i]
+    # 以真实类簇的聚类标签的众数作为该类簇的标签
+    label_i <- as.numeric(names(table(true_i))[table(true_i) == max(table(true_i))])
+    new_EstmateClust[EstmateClust==label_i] <- i
+  }
+  # print(new_EstmateClust)
+  return(f1_fun(new_EstmateClust,TrueClust))
+}
+```
+
+### 内部有效性指标与其他外部有效性
+
+NbClust函数根据内部有效性给出最佳聚类数。    
+？聚类算法中使用的距离计算方法是？     
+？模糊聚类cmeans的有效性指标xb？
+```{r message=FALSE, warning=FALSE}
+library(NbClust)
+library(fclust)
+library(e1071)
+library(ClusterR)
+computeIndeices<-function(x,TrueClust,distance){
+  # 内部有效性计算方法*9
+  in_ind<-c("kl", "ch", "mcclain","db","silhouette", "dunn","ccc","sdindex","sdbw")
+  
+  re<-c()
+  # NbClust中不支持马氏距离，事先进行计算
+  if(distance=="mahalanobis"){
+    distc<-matrix(nrow = nrow(x),ncol = nrow(x))
+    for(i in 1:nrow(x)){
+      for(j in 1:i){
+        distij<-(((x[i,]-x[j,])%*% t(t(x[i,]-x[j,]))) / cov(x[i,],x[j,]))
+        distc[i,j]<-distij
+      }
+    }
+    dist<-as.dist(distc)
+  }
+  for(ind in in_ind){ 
+    if(distance=="mahalanobis"){
+      res_i <- NbClust(x, diss=dist,distance = NULL, min.nc=2, max.nc=12, # 内部有效性
+                       method = "kmeans", index = ind)
+    }else{
+      res_i <- NbClust(x, distance = distance, min.nc=2, max.nc=12, 
+                       method = "kmeans", index = ind)
+    }
+    # 外部有效性
+    jaccard <- external_validation(TrueClust, res_i$Best.partition ,method = "jaccard_index")
+    purity <- external_validation(TrueClust, res_i$Best.partition ,method = "purity")
+    F1_score <-computeF1_score(TrueClust,res_i$Best.partition)
+    re<-cbind(re,c(res_i$Best.nc,jaccard,purity,F1_score))
+    #assign(paste("res_",ind,sep = ""),res_i)
+  }
+  re<-data.frame(re)
+  colnames(re)<-in_ind
+  row.names(re)<-c("best_k","value_index","jaccard","purity","F1_score")
+  return(re)
+}
+```
+
+## 测试距离计算方法的影响
+
+### 实验设计
+
+对于每一种数据情形，随机生成100个数据集，对每一个数据集进行聚类（给定聚类数目的范围），采用5种距离计算方法计算聚类的内部有效性指标，以选择最优的聚类数目，并计算最优聚类的外部有效性指标。将100次重复试验的结果进行汇总作为最终的实验结果。    
+Data_compute函数：一轮实验，产生数据并计算指标。   
+res_combine函数： 对重复试验的结果进行汇总，并计算最优聚类数的方差。
+```{r message=FALSE, warning=FALSE}
+# 一轮实验：产生数据并计算指标
+Data_compute<-function(t,n = n, p = p, sigma = sigma, outlier = outlier, centers = NA){
+  print(t)
+  set.seed(t)
+  Data <- GenData(n = n, p = p, sigma = sigma, outlier = outlier, centers = centers)
+  out<-c()
+  for(dist_m in distance){ # 测试不同的距离计算方式
+    out <- rbind(out,computeIndeices(Data$data,Data$clustLab,dist_m))
+  }
+  return(out)
+}
+
+# 汇总结果：指标的平均值&最优类簇个数的方差
+library(stringr)
+res_combine<-function(res_all){
+  res_sum<-Reduce("+",res_all)/length(times)
+  res_sum<-cbind(rep(distance,each=5),
+                 rep(c("best k","index value","jaccard","purity","F1 score"),5),
+                 res_sum)
+  colnames(res_sum)[1:2]<-c('distance','ex_index')
+  best_kdf<-c()
+  for(i in times){
+    res<-res_all[[i]]
+    best_ks<-res[str_detect(row.names(res),"best_k"),]
+    row.names(best_ks)<-distance
+    best_kdf<-rbind(best_kdf,best_ks)
+  }
+  best_kvar<-c()
+  for(dist_m in distance){
+    dist_bestk<-best_kdf[str_detect(row.names(best_kdf),dist_m),]
+    best_kvar<-rbind(best_kvar,apply(dist_bestk, 2, var))
+  }
+  best_kvar<-cbind(distance,ex_index=rep("k_var",5),best_kvar)
+  res_comb<-rbind(res_sum,best_kvar)
+  res_comb<-res_comb[order(res_comb$distance),]
+  return(res_comb)
+}
+
+```
+
+### 1. 完全分离
+
+```{r eval=FALSE}
+# 重复100次，控制随机性的影响
+times <- c(1:100)
+distance<-c("mahalanobis","euclidean", "maximum", "manhattan", "canberra")
+
+# 1. 完全分离
+p = 6 # 6维
+n <- rep(100,5) # 5类 每类100个
+sigma <- rep(0.04,5)
+outlier <- 0
+# 重复实验
+res_all1 <- lapply(times,Data_compute,n = n, p = p, sigma = sigma, outlier = outlier)
+# 汇总结果
+res_comb1<-res_combine(res_all1)
+```
+
+结果如下：
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# write.csv(res_comb1,"res_comb1.csv",row.names = F)
+library(knitr)
+library(kableExtra)
+library(dplyr)
+res_comb1<-read.csv("res_comb1.csv")
+knitr::kable(res_comb1[res_comb1$ex_index!="index value",], digits = 2, caption = "类簇完全分离的情况") %>% kable_styling(font_size = 12)
+```
+
+### 2. 完全分离有噪音点
+
+```{r eval=FALSE}
+# 2. 完全分离有噪音点
+p = 6 # 6维
+n <- rep(100,5) # 5类 每类100个
+sigma <- rep(0.04,5)
+outlier <- 50 # 50个噪音点
+# 重复实验
+res_all2 <- lapply(times,Data_compute,n = n, p = p, sigma = sigma, outlier = outlier)
+# 汇总结果
+res_comb2<-res_combine(res_all2)
+```
+
+结果如下：
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# write.csv(res_comb2,"res_comb2.csv",row.names = F)
+res_comb2<-read.csv("res_comb2.csv")
+knitr::kable(res_comb2[res_comb2$ex_index!="index value",], digits = 2, caption = "类簇完全分离有噪音点的情况") %>% kable_styling(font_size = 12)
+```
+
+### 3. 类簇的密度不同
+
+```{r eval=FALSE}
+# 3.	类簇的密度不同
+p = 6 # 6维
+n <- rep(100,5) # 5类 每类100个
+sigma <- c(0.04,0,04,0.1,0.15,0.15) # sigma不同
+outlier <- 0 
+# 重复实验
+res_all3 <- lapply(times,Data_compute,n = n, p = p, sigma = sigma, outlier = outlier)
+# 汇总结果
+res_comb3<-res_combine(res_all3)
+```
+
+结果如下：
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# write.csv(res_comb3,"res_comb3.csv",row.names = F)
+res_comb3<-read.csv("res_comb3.csv")
+knitr::kable(res_comb3[res_comb3$ex_index!="index value",], digits = 2, caption = "类簇的密度不同的情况") %>% kable_styling(font_size = 12)
+```
+
+### 4.	包含子类
+
+```{r eval=FALSE}
+# 4.	包含子类
+p = 6 # 6维
+n <- rep(100,5)
+sigma <- rep(0.04,5)
+k <- 3 # 三个大类
+k_sub <- 2 # 其中两类含有子类
+centers <-replicate(p,sample(c(-3:3),k,replace = F)) # 随机选取类中心
+bias <- sample(c(-0.5,0.5),k_sub*p,replace = T) # 设置子类的偏移
+dim(bias)<-c(k_sub,p)
+centers <- rbind(centers, centers[sample(1:k,k_sub),] + bias) 
+outlier <- 0 
+# 重复实验
+res_all4 <- lapply(times,Data_compute,n = n, p = p, sigma = sigma, 
+                   outlier = outlier, centers=centers)
+# 汇总结果
+res_comb4<-res_combine(res_all4)
+```
+
+结果如下：
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# write.csv(res_comb4,"res_comb4.csv",row.names = F)
+res_comb4<-read.csv("res_comb4.csv")
+knitr::kable(res_comb4[res_comb4$ex_index!="index value",], digits = 2, caption = "包含子类的情况") %>% kable_styling(font_size = 12)
+```
+
+### 5. 类簇的大小不同
+
+```{r eval=FALSE}
+# 5.	类簇的大小不同
+p = 6 # 6维
+n <- c(25,50,50,100,150)
+sigma <- c(0.02,0.04,0.04,0.08,0.12)
+outlier <- 0 
+# 重复实验
+res_all5 <- lapply(times,Data_compute,n = n, p = p, sigma = sigma, outlier = outlier)
+# 汇总结果
+res_comb5<-res_combine(res_all5)
+```
+
+结果如下：
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# write.csv(res_comb5,"res_comb5.csv",row.names = F)
+res_comb5<-read.csv("res_comb5.csv")
+knitr::kable(res_comb5[res_comb5$ex_index!="index value",], digits = 2, caption = "类簇大小不同的情况") %>% kable_styling(font_size = 12)
+```
+
+### 6. 考虑一类特殊的数据：特征之间具有相关性
+
+可以通过特征提取消除相关性，但会带来信息损失，是一个trade off的问题。在特征具有相关性的情形下，距离计算方式如何影响内部有效性？
+
+#### 生成数据
+
+```{r}
+# 生成数据：特征之间具有相关性
+# 修改GenData函数，pr表示有相关性的特征维数（<=p），c表示协方差
+library(Matrix)
+GenDataR <- function(n = c(50,50), p = 2, pr = 2, c = 0.03,
+                     sigma = c(0.04,0.04), outlier = 0, centers = NA){
+  # 类簇个数
+  k <- length(n)
+  
+  # 判断参数输入是否有效
+  if(k!=length(sigma)){ 
+    print("类别数量与标准差参数的长度不匹配！")
+    return(NULL)
+  }
+  # 给定类簇中心（若不赋值将随机产生）
+  if(is.na(centers)[1])
+    # 从等差数列中抽样产生类簇中心（保证“完全分离”）
+    centers <- replicate(p,sample(c(-3:3),k,replace = F))
+  else if(k!=dim(centers)[1]){
+    print("类别数量与类中心参数的长度不匹配！")
+    return(NULL)
+  }
+  
+  data <- c() # 生成的数据
+  clustLab <- c() # 类簇类别的标签
+  for(i in 1:k){
+    center <- centers[i,]
+    # 协方差矩阵
+    covar <- as.matrix(sparseMatrix(i=rep(c(1:pr),each=pr),j=rep(c(1:pr),pr),
+                           x=rep(c,pr^2),dims = c(p,p)))
+    diag(covar) <- sigma[i]
+    cluster <- rmvnorm(n[i], center, covar) 
+    # 产生一个类簇
+    data <- rbind(data, cluster) 
+    # 合并已生成的数据和标签
+    clustLab <- c(clustLab,rep(i,n[i]))
+  }
+  
+  # 产生噪音点 （不属于任何一类）
+  if(outlier > 0){
+    # 从均匀分布中产生噪音点 
+    outdata <- t(replicate(outlier, runif(p,-3,3)))
+    # 合并数据和标签
+    data <- rbind(data,outdata)
+    clustLab <- c(clustLab,rep(k+1,outlier))
+  }
+  
+  # 返回结果（数据和类簇标签）
+  out <- list(data=data, clustLab=clustLab)
+  return(out)
+}
+
+Data_compute_r<-function(t,n = n, p = p, pr=pr , c=0.03 ,sigma = sigma, outlier = outlier, centers = NA){
+  print(t)
+  set.seed(t)
+  Data <- GenDataR(n = n, p = p, sigma = sigma,pr=pr , c=c,outlier = outlier, centers = centers)
+  out<-c()
+  for(dist_m in distance){ # 测试不同的距离计算方式
+    out <- rbind(out,computeIndeices(Data$data,Data$clustLab,dist_m))
+  }
+  return(out)
+}
+
+```
+
+以2维为例：
+
+```{r}
+p = 2
+n <- rep(100,5)
+sigma <- rep(0.04,5)
+data_r <- GenDataR(n = n, p = p, sigma = sigma, outlier = 0)
+clustPlot(data_r)
+```
+
+#### 距离计算方式的影响
+
+```{r eval=FALSE, message=FALSE, warning=FALSE}
+# 重复100次，控制随机性的影响
+times <- c(1:100)
+distance<-c("mahalanobis","euclidean", "maximum", "manhattan", "canberra")
+
+p = 6 # 6维
+pr = 3 # 3个特征之间相关
+n <- rep(100,5) # 5类 每类100个
+sigma <- rep(0.04,5)
+outlier <- 0
+# 重复实验
+res_all6 <- lapply(times,Data_compute_r,n = n, p = p, pr=pr,
+                   sigma = sigma, outlier = outlier)
+# 汇总结果
+res_comb6<-res_combine(res_all6)
+write.csv(res_comb6,"res_comb6.csv",row.names = F)
+```
+
+### 汇总结果
+
+```{r message=FALSE, warning=FALSE}
+res_comb6<-read.csv("res_comb6.csv")
+data_class <- c('完全分离','完全分离有噪音点','类簇的密度不同','包含子类','类簇的大小不同','特征之间有相关')
+bestk_comb<-c()
+for(i in 1:6){
+  res_temp<-get(paste("res_comb",i,sep = ""))
+  res_temp<-res_temp[res_temp$ex_index=="best k",]
+  res_temp<-cbind(`data set`=rep(data_class[i],5),res_temp)
+  bestk_comb<-rbind(bestk_comb,res_temp)
+}
+knitr::kable(bestk_comb[,-3], digits = 2, caption = "最优聚类数") %>% 
+  kable_styling(font_size = 12)
+```
+
+### 真实数据
+#### 鸢尾花数据
+
+##### 类簇的分布以及变量之间的关系
+
+```{r message=FALSE, warning=FALSE,dpi=200}
+library(MASS)
+library(GGally)
+ggpairs(iris, columns=1:4,mapping = aes(color=Species)) 
+```
+
+##### 内部有效性测试结果
+
+```{r message=FALSE, warning=FALSE}
+distance<-c("mahalanobis","euclidean", "maximum", "manhattan", "canberra")
+iris_numeric<-apply(iris,2,as.numeric)
+
+res_iris<-c()
+  for(dist_m in distance){
+    res_iris <- rbind(res_iris,computeIndeices(iris_numeric[,1:4],as.numeric(iris$Species),dist_m))
+  }
+res_iris<-cbind(distance=rep(distance,each=5),res_iris)
+knitr::kable(res_iris, digits = 2, caption = "鸢尾花数据集上的结果") %>% kable_styling(font_size = 12)
+```
+
+#### 红酒数据
+
+##### 类簇的分布以及变量之间的关系
+
+这里只展示了4个变量。
+```{r message=FALSE, warning=FALSE,dpi=200}
+wine<-read.csv("红酒数据//wine.data",header = FALSE)
+colnames(wine)<-c('class','Alcohol','Malic acid','Ash','Alcalinity of ash' ,'Magnesium','Total phenols','Flavanoids','Nonflavanoid phenols','Proanthocyanins','Color intensity','Hue','OD280/OD315','Proline')
+ggpairs(wine, columns=2:5,mapping = aes(color=as.factor(wine$class))) 
+```
+
+##### 内部有效性测试结果
+
+```{r}
+wine<-apply(wine,2,as.numeric)
+res_wine<-c()
+  for(dist_m in distance){
+    res_wine <- rbind(res_wine,computeIndeices(wine[,2:ncol(wine)],wine[,1],dist_m))
+  }
+res_wine<-cbind(distance=rep(distance,each=5),res_wine)
+knitr::kable(res_wine, digits = 2, caption = "红酒数据集上的结果") %>% kable_styling(font_size = 12)
+```
+
+#### 玻璃数据
+
+##### 类簇的分布以及变量之间的关系
+
+这里只展示了4个变量。
+```{r message=FALSE, warning=FALSE,dpi=200}
+glass<-read.csv("玻璃数据//glass.data",header = FALSE)
+colnames(glass)<-c('Id','RI','Na','Mg', 'Al','Si','K','Ca', 'Ba','Fe','Type')
+ggpairs(glass, columns=2:5,mapping = aes(color=as.factor(glass$Type))) 
+```
+
+```{r}
+glass<-apply(glass,2,as.numeric)
+
+res_glass<-c()
+  for(dist_m in distance){
+    res_glass<- rbind(res_glass,computeIndeices(glass[,2:10],glass[,11],dist_m))
+  }
+res_glass<-cbind(distance=rep(distance,each=5),res_glass)
+knitr::kable(res_glass, digits = 2, caption = "玻璃数据集上的结果") %>% kable_styling(font_size = 12)
+```
+
+#### 真实数据结果的汇总
+
+真实数据的特征之间可能具有相关性，我们的研究中没考虑这一点。——不足
+```{r}
+dataname<-c("iris","wine","glass")
+res_comb7<-c()
+for(dataset in dataname){
+  res <- get(paste("res_",dataset,sep = ""))
+  res <- cbind(dataset = rep(dataset,10),
+    res[str_detect(row.names(res),'best_k|F1_score'),])
+  res_comb7<-rbind(res,res_comb7)
+}
+knitr::kable(res_comb7, digits = 2, caption = "真实数据集上的结果") %>% kable_styling(font_size = 12)
+```
+
+
