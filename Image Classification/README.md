@@ -1,5 +1,3 @@
-[TOC]
-
 # 基于Python的图像降维与分类
 
 ## 一、 概述
@@ -10,7 +8,7 @@
 
 ​        本文采用的数据是CIFAR-100数据集，它包含有20个大类的图像，该20类图像被细分成100个小类，每个小类各有500个训练图像和100个测试图像。每一张图像的大小相同，均为32×32个像素点，每个像素点包含RGB三个通道的颜色信息，即每张图片包含3072（32×32×3）个数字信息。本文选用了其中三个小类的图像，在数据集中的数值型标签分别为2、3、70，类别名称分别为“baby”、“bear”和“rose”，图1展示了每一类中的前6张训练图像。
 
-![1586316168756](C:\Users\yangl\AppData\Local\Temp\1586316168756.png)
+![1](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/1.png)
 
  
 
@@ -22,7 +20,7 @@
 
 ​        常用的核函数有线性核、多项式核、RBF核以及双曲正切核，它们的函数形式如表1所示[[1\]](#_ftn1)。本文后续将通过实验的方法比较不同的核函数及其参数取值下的降维效果。
 
-![1586316210734](C:\Users\yangl\AppData\Local\Temp\1586316210734.png)
+![2](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/2.png)
 
 ### （二） 参数优化与模型选择
 
@@ -36,7 +34,7 @@
 
 ​        结果如图2和表2所示。图2分别给出了使用Poly和RBF核函数时，训练样本上的重构误差（拟合误差）和测试样本上的重构误差（测试误差）随γ的变化情况。在各自给定的γ取值范围内，使用两种核函数降维的拟合误差均随γ增大而下降；对于测试误差，使用Poly时，存在一个γ的取值使得测试误差最小；而使用RBF时，测试误差随γ增大而增大。表2汇总了核函数参数优化后的降维效果以及不带参数的核函数的降维效果。使用不带有参数的核函数Linear和Cosine时，拟合误差和测试误差都远大于其他核函数。基于上述结果，可以认为采用Poly核的Kernel PCA降维效果较其他核更好，且当其γ参数取1.15×10­-6时，测试集上的重构误差最小，能够相对较好的提取原始数据中的信息。
 
- ![1586316300896](C:\Users\yangl\AppData\Local\Temp\1586316300896.png)
+ ![4](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/4.png)
 
 ### 2.     主成分个数的确定
 
@@ -44,17 +42,17 @@
 
 ​        图3给出了主成分个数分别取100、200和300时测试误差随γ的变化情况。可以看出，无论γ的取值如何，主成分个数更多时，重构误差都更小。同时，最优的gamma取值对主成分个数不敏感，即不同主成分个数下，最优的γ取值都大致不变。因此，可基于前面参数调优的结果选用Poly核及其最优的参数取值，来进一步选择主成分个数，而无需重新进行参数调优。
 
-![1586316389487](C:\Users\yangl\AppData\Local\Temp\1586316389487.png)
+![6](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/6.png)
 
 ​        主成分个数选择的依据是：当测试误差随主成分个数增加的变化量（margin）的绝对值小于某个阈值时，则认为增加主成分个数不再明显的较小测试误差，将此时的主成分个数作为模型适用的主成分个数。本文设置该阈值为0.1。从图4中可以看出，当主成分个数大于300时，margin的绝对值趋于稳定且小于0.1，因此本文选用300个主成分。
 
-![1586316402842](C:\Users\yangl\AppData\Local\Temp\1586316402842.png)
+![7](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/7.png)
 
 ## （三） 特征提取与图像重构
 
 ​        基于参数优化与模型选择的结果，建立最终的Kernel PCA模型并对图像进行特征提取。利用训练好的模型对训练图像进行降维，部分原始图像与重构图像如图5所示，可以看出重构图像在色彩分布上与原始图像比较类似，但损失了较多细节信息，整体上较为模糊。利用模型对测试图像进行降维并绘制图像如图6，重构效果明显比训练图像差，在色彩上和细节上有较多失真。
 
-![1586316458779](C:\Users\yangl\AppData\Local\Temp\1586316458779.png)
+![8](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/8.png)
 
 ## 一、 图片分类
 
@@ -72,7 +70,7 @@
 
 ​        SVM假设训练样本在样本空间或者特征空间中是线性可分的，但在现实任务中往往很难确定合适的核函数使训练集在特征空间中线性可分，为解决这一问题，可以对每个样本点引入一个松弛变量，使得SVM的目标为间隔加上松弛变量大于等于1。对于松弛变量，进一步引入一个罚参数C，C越大，则松弛变量接近0，即对误分类的惩罚增大，趋向于对训练集全分对的情况，这样对训练集测试时准确率高，但泛化能力弱。C值小，对误分类的惩罚减小，将被误分类的样本作为噪声点，模型泛化能力较强。本文在不同的核函数下，采用网格搜寻和交叉验证的方法，选择合适的C和γ的取值，参数调优的结果如表3所示。
 
-![1586316519247](C:\Users\yangl\AppData\Local\Temp\1586316519247.png)
+![9](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/9.png)
 
 ### 3.     朴素贝叶斯
 
@@ -85,23 +83,20 @@
 ### 1.     查准率(Precision)
 
 ​        查准率用以衡量正样本的分类准确率，即被预测为正样本的样本中真的正样本的占比。
-$$
-\text { Precision }=\frac{T P}{T P+F P}
-$$
+
+![公式1](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/公式1.jpg)
 
 ### 2.     召回率(Recall)
 
 ​        召回率表示在所有正样本中，被识别为正样本的占比。
-$$
-\text {Recall}=\frac{T P}{T P+F N}
-$$
+
+![公式2](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/公式2.jpg)
 
 ### 3.     F1 score 
 
 ​        F1 score是查准率和召回率的调和平均。
-$$
-\frac{2}{F_{1}}=\frac{1}{P}+\frac{1}{R} \Rightarrow F_{1}=\frac{2 P R}{P+R}=\frac{2 T P}{2 T P+F P+T N}
-$$
+
+![公式3](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/公式3.jpg)
 
 ## （三） 分类性能评估
 
@@ -113,15 +108,17 @@ $$
 
 ​        从应用角度来说，我们更关注模型在测试集上的表现。综合三个指标来看，测试集上的分类效果最佳的是RNF核SVM和Sigmoid核SVM，各项指标达到0.78；多项式核SVM表现稍逊，但差别不明显。K近邻和线性核SVM的各项指标值在0.75上下，虽然线性SVM在训练集上的准确率达到100%，但在测试集上的表现并不突出，说明模型存在过拟合。朴素贝叶斯的分类效果最差，F1 score仅0.38，对于本文的三分类问题，其分类效果比较接近随机分类的效果。
 
-![1586316604917](C:\Users\yangl\AppData\Local\Temp\1586316604917.png) 
+![10](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/10.png)
 
 ### 2.     最优模型的分类效果
 
 ​        根据模型比较的结果，本文选出最优的模型为RBF核SVM和Sigmoid核SVM。表5和表6给出了它们在各类样本上的分类表现及混淆矩阵。两个模型在不同样本类别上的分类效果都有类似的差别，即对“bear”类的图片分类准确率最高，对“baby”类的分类准确率最低。从混淆矩阵来看，“baby”类更易被误分类为“rose”，而“bear”和“rose”都更易误分类为“baby”；“bear”误分类为“baby”相较“rose”表现得更明显。由此我们可以认为，模型的分类效果与训练样本类别的选择有关，若不同类别的样本之间的比较相似（比如都属于动物），模型在训练时更不容易提取出各类别的各自的特征，进而在测试集上更可能出现误分类。
 
-![1586316631335](C:\Users\yangl\AppData\Local\Temp\1586316631335.png) 
+![11](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/11.png)
 
-​        图7给出了RBF核SVM模型在测试集上的部分分类结果，绿色标签表示被正确分类，红色标签表示误分类。  ![1586316665888](C:\Users\yangl\AppData\Local\Temp\1586316665888.png)
+​        图7给出了RBF核SVM模型在测试集上的部分分类结果，绿色标签表示被正确分类，红色标签表示误分类。  
+
+![12](https://github.com/Yannie-CUFE/Course-Projects/blob/master/Image%20Classification/images/12.png)
 
 二、 总结
 
